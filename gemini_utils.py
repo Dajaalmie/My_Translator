@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import io
-import google.generativeai as genai
+import google.genai as genai
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -18,7 +18,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 
 # Load API key from environment
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyCcPgyoaVlx0FDjsbPbPJ0OTo1xlahjcUk")
-genai.configure(api_key=GEMINI_API_KEY)
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 DEFAULT_MODEL = "gemini-2.5-flash"
 SUPPORTED_FILE_TYPES = ["txt", "docx", "pdf", "jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff"]
@@ -126,8 +126,6 @@ def call_gemini_for_translation(filename: str, file_bytes: bytes, target_languag
             detected_language = "English"
         
         # Translate the extracted text
-        model_instance = genai.GenerativeModel(model_name)
-        
         prompt = f"""
         Translate the following text to {target_language}:
         
@@ -136,7 +134,10 @@ def call_gemini_for_translation(filename: str, file_bytes: bytes, target_languag
         Provide only the translation without additional commentary. Maintain the original formatting and structure as much as possible.
         """
         
-        response = model_instance.generate_content(prompt)
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt
+        )
         translation = response.text
         
         # Generate examples
@@ -150,7 +151,10 @@ def call_gemini_for_translation(filename: str, file_bytes: bytes, target_languag
         """
         
         try:
-            examples_response = model_instance.generate_content(examples_prompt)
+            examples_response = client.models.generate_content(
+                model=model_name,
+                contents=examples_prompt
+            )
             examples_text = examples_response.text
             examples = [line.strip() for line in examples_text.split('\n') if line.strip() and any(char.isdigit() for char in line)][:3]
         except:
@@ -189,8 +193,6 @@ def call_gemini_for_translation(filename: str, file_bytes: bytes, target_languag
 def chat_with_context(question: str, context: str, model: str = DEFAULT_MODEL) -> str:
     """Chat with Gemini using provided context."""
     try:
-        model_instance = genai.GenerativeModel(model)
-        
         prompt = f"""
         Context: {context}
         
@@ -199,7 +201,10 @@ def chat_with_context(question: str, context: str, model: str = DEFAULT_MODEL) -
         Please answer the question based on the provided context. Be helpful and specific.
         """
         
-        response = model_instance.generate_content(prompt)
+        response = client.models.generate_content(
+            model=model,
+            contents=prompt
+        )
         return response.text
     except Exception as e:
         return f"Chat error: {str(e)}"
@@ -230,7 +235,6 @@ def render_diagram_explanations(image_bytes: bytes, model: str = DEFAULT_MODEL) 
     """Generate explanations for diagrams/images using Gemini Vision."""
     try:
         image = Image.open(io.BytesIO(image_bytes))
-        model_instance = genai.GenerativeModel(model)
         
         prompt = """
         Analyze this image and provide:
@@ -242,7 +246,10 @@ def render_diagram_explanations(image_bytes: bytes, model: str = DEFAULT_MODEL) 
         Be thorough and specific.
         """
         
-        response = model_instance.generate_content([prompt, image])
+        response = client.models.generate_content(
+            model=model,
+            contents=[prompt, image]
+        )
         return response.text
     except Exception as e:
         return f"Image analysis error: {str(e)}"
@@ -262,10 +269,12 @@ def extract_text_from_file(file_bytes: bytes, file_name: str, model: str = DEFAU
         
         elif file_extension in [".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"]:
             image = Image.open(io.BytesIO(file_bytes))
-            model_instance = genai.GenerativeModel(model)
             
             prompt = "Extract all text from this image. Preserve the structure and formatting as much as possible."
-            response = model_instance.generate_content([prompt, image])
+            response = client.models.generate_content(
+                model=model,
+                contents=[prompt, image]
+            )
             return response.text
         
         elif file_extension == ".pdf":
