@@ -15,7 +15,13 @@ from google.genai import types
 # =========================
 # CONFIG
 # =========================
-GEMINI_API_KEY = "AIzaSyAvSVBrvraXKqUOXz8qVoqDe5zj5ONpYDI"
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 MODEL_NAME = "gemini-2.5-flash"
 HISTORY_FILE = "history.json"
 
@@ -148,8 +154,13 @@ for k, v in defaults.items():
 # CLIENT
 # =========================
 def get_client():
-    if not GEMINI_API_KEY or GEMINI_API_KEY == "PASTE_YOUR_GEMINI_API_KEY_HERE":
-        st.error("Add your Gemini API key first inside app.py.")
+    if not GEMINI_API_KEY:
+        st.error("❌ API Key Error: GEMINI_API_KEY environment variable not found.")
+        st.error("🔧 Fix: Add GEMINI_API_KEY to your environment variables or .env file.")
+        st.stop()
+    if GEMINI_API_KEY == "PASTE_YOUR_GEMINI_API_KEY_HERE":
+        st.error("❌ API Key Error: Please replace the placeholder API key.")
+        st.error("🔧 Fix: Set your actual Gemini API key in the environment variables.")
         st.stop()
     return genai.Client(api_key=GEMINI_API_KEY)
 
