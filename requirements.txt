@@ -1,8 +1,8 @@
 streamlit
-google-genai
-pymupdf
+opencv-python
 python-docx
-Pillow
-opencv-python-headless
+google-generativeai
+pillow
 numpy
+python-dotenv
 reportlab
