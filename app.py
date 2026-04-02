@@ -29,8 +29,6 @@ from google.genai import types
 # =========================
 # CONFIG
 # =========================
-import os
-
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 MODEL_NAME = "gemini-2.5-flash"
 HISTORY_FILE = "history.json"
@@ -625,8 +623,60 @@ if view == "Home":
         label_visibility="visible"
     )
 
+    send_chat = st.button("Send", use_container_width=True)
+
     if chat_file is not None:
         st.markdown(f'<div class="small-note">Attached: {chat_file.name}</div>', unsafe_allow_html=True)
+
+    if send_chat:
+        if not chat_message.strip() and chat_file is None:
+            st.warning("Type a message or attach a file.")
+        else:
+            user_text = chat_message.strip() or ""
+            if chat_file is not None:
+                user_text = (user_text + f"\n[Attached file: {chat_file.name}]").strip()
+
+            st.session_state.chat_messages.append({"role": "user", "content": user_text})
+
+            with st.spinner("Processing..."):
+                try:
+                    document_text = ""
+                    filename = None
+                    used_ocr = False
+
+                    if chat_file is not None:
+                        extracted = extract_content(chat_file)
+                        document_text = extracted["original_text"].strip()
+                        filename = extracted["filename"]
+                        used_ocr = extracted["used_ocr"]
+
+                    answer = call_gemini_text(
+                        build_chat_prompt(
+                            chat_message.strip() or "Please work with the attached document.",
+                            st.session_state.output_language,
+                            document_text,
+                        )
+                    )
+
+                    st.session_state.chat_messages.append({"role": "assistant", "content": answer})
+
+                    add_history(
+                        "chat",
+                        "Chat",
+                        {
+                            "filename": filename,
+                            "message": chat_message.strip(),
+                            "answer": answer,
+                            "original_text": document_text[:5000],
+                            "target_language": st.session_state.output_language,
+                            "used_ocr": used_ocr,
+                        }
+                    )
+                    st.rerun()
+
+                except Exception as e:
+                    st.session_state.chat_messages.append({"role": "assistant", "content": f"Error: {str(e)}"})
+                    st.rerun()
 
     st.markdown('</div>', unsafe_allow_html=True)
 
