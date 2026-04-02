@@ -3,8 +3,22 @@ import json
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-import cv2
-import fitz
+try:
+    import cv2
+except ImportError as e:
+    st.error("❌ OpenCV Error: cv2 module not found.")
+    st.error("🔧 Fix: Ensure opencv-python is properly installed.")
+    st.error("📦 Add 'opencv-python' to requirements.txt and redeploy.")
+    st.stop()
+
+try:
+    import fitz
+except ImportError as e:
+    st.error("❌ PyMuPDF Error: fitz module not found.")
+    st.error("🔧 Fix: Ensure PyMuPDF is properly installed.")
+    st.error("📦 Add 'PyMuPDF' to requirements.txt and redeploy.")
+    st.stop()
+
 import numpy as np
 import streamlit as st
 from PIL import Image
