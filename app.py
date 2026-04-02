@@ -1,7 +1,7 @@
 import io
 import json
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import streamlit as st
@@ -11,34 +11,41 @@ from google import genai
 from google.genai import types
 
 try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv(*args, **kwargs):
+        return False
+
+load_dotenv()
+
+try:
     import cv2
-except ImportError as e:
+except ImportError:
     st.error("❌ OpenCV Error: cv2 module not found.")
-    st.error("🔧 Fix: Ensure opencv-python is properly installed.")
-    st.error("📦 Add 'opencv-python' to requirements.txt and redeploy.")
+    st.error("🔧 Fix: Add 'opencv-python-headless' to requirements.txt and redeploy.")
     st.stop()
 
 try:
     import fitz
-except ImportError as e:
+except ImportError:
     st.error("❌ PyMuPDF Error: fitz module not found.")
-    st.error("🔧 Fix: Ensure PyMuPDF is properly installed.")
-    st.error("📦 Add 'PyMuPDF' to requirements.txt and redeploy.")
+    st.error("🔧 Fix: Add 'PyMuPDF' to requirements.txt and redeploy.")
     st.stop()
 
 # =========================
 # CONFIG
 # =========================
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+st.set_page_config(page_title="Babuchiti", page_icon="📘", layout="wide")
+
 MODEL_NAME = "gemini-2.5-flash"
 HISTORY_FILE = "history.json"
-
-st.set_page_config(page_title="Babuchiti", page_icon="📘", layout="wide")
+LOGO_FILE = "ABT LOGO.jpg"
 
 # =========================
 # STYLES
 # =========================
-st.markdown("""
+st.markdown(
+    """
 <style>
 .block-container {
     padding-top: 1.2rem;
@@ -137,7 +144,9 @@ st.markdown("""
     margin-bottom: 12px;
 }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 # =========================
 # SESSION STATE
@@ -161,16 +170,23 @@ for k, v in defaults.items():
 # =========================
 # CLIENT
 # =========================
+def get_gemini_api_key() -> str:
+    return (
+        st.secrets.get("GEMINI_API_KEY", "")
+        or os.getenv("GEMINI_API_KEY", "")
+    ).strip()
+
+
 def get_client():
-    if not GEMINI_API_KEY:
-        st.error("❌ API Key Error: GEMINI_API_KEY environment variable not found.")
-        st.error("🔧 Fix: Add GEMINI_API_KEY to your environment variables or .env file.")
+    gemini_api_key = get_gemini_api_key()
+    if not gemini_api_key:
+        st.error("❌ API Key Error: GEMINI_API_KEY was not found.")
+        st.error("🔧 Fix: Add GEMINI_API_KEY to Streamlit secrets or your .env file.")
         st.stop()
-    if GEMINI_API_KEY == "PASTE_YOUR_GEMINI_API_KEY_HERE":
+    if gemini_api_key == "PASTE_YOUR_GEMINI_API_KEY_HERE":
         st.error("❌ API Key Error: Please replace the placeholder API key.")
-        st.error("🔧 Fix: Set your actual Gemini API key in the environment variables.")
         st.stop()
-    return genai.Client(api_key=GEMINI_API_KEY)
+    return genai.Client(api_key=gemini_api_key)
 
 # =========================
 # HISTORY
@@ -180,13 +196,16 @@ def load_history() -> List[Dict[str, Any]]:
         return []
     try:
         with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+        return data if isinstance(data, list) else []
     except Exception:
         return []
+
 
 def save_history(items: List[Dict[str, Any]]) -> None:
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(items, f, ensure_ascii=False, indent=2)
+
 
 def add_history(entry_type: str, title: str, payload: Dict[str, Any]) -> None:
     items = load_history()
@@ -201,8 +220,10 @@ def pil_to_bytes(img: Image.Image, fmt: str = "PNG") -> bytes:
     img.save(bio, format=fmt)
     return bio.getvalue()
 
+
 def bytes_to_pil(data: bytes) -> Image.Image:
     return Image.open(io.BytesIO(data)).convert("RGB")
+
 
 def read_txt(file_bytes: bytes) -> str:
     try:
@@ -210,11 +231,13 @@ def read_txt(file_bytes: bytes) -> str:
     except UnicodeDecodeError:
         return file_bytes.decode("latin-1", errors="ignore")
 
+
 def read_docx(file_bytes: bytes) -> str:
     bio = io.BytesIO(file_bytes)
     doc = Document(bio)
     paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
     return "\n".join(paragraphs)
+
 
 def extract_text_from_pdf_if_possible(file_bytes: bytes) -> str:
     pdf = fitz.open(stream=file_bytes, filetype="pdf")
@@ -226,8 +249,9 @@ def extract_text_from_pdf_if_possible(file_bytes: bytes) -> str:
     pdf.close()
     return "\n\n".join(parts).strip()
 
+
 def render_pdf_pages(file_bytes: bytes, zoom: float = 2.0) -> List[Image.Image]:
-    images = []
+    images: List[Image.Image] = []
     pdf = fitz.open(stream=file_bytes, filetype="pdf")
     for page in pdf:
         mat = fitz.Matrix(zoom, zoom)
@@ -244,19 +268,12 @@ def detect_diagram_crops(
     pil_img: Image.Image,
     min_w_ratio: float = 0.15,
     min_h_ratio: float = 0.15,
-    max_crops: int = 8
+    max_crops: int = 8,
 ) -> List[Image.Image]:
-    """
-    Detect only talismans, diagrams, or tables - not random text areas.
-    More selective filtering for meaningful visual elements.
-    """
     img = np.array(pil_img.convert("RGB"))
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
 
-    # Stronger threshold for black/white manuscripts and scanned pages
     _, thresh = cv2.threshold(gray, 210, 255, cv2.THRESH_BINARY_INV)
-
-    # Connect nearby strokes with larger kernel for better diagram detection
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (12, 12))
     closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=3)
 
@@ -272,30 +289,21 @@ def detect_diagram_crops(
         x, y, bw, bh = cv2.boundingRect(cnt)
         area = bw * bh
 
-        # Must be substantial size
         if bw < min_w or bh < min_h:
             continue
-
-        # ignore almost full-page captures
         if bw > int(w * 0.90) and bh > int(h * 0.90):
             continue
 
-        # More strict filtering for text-like strips
         aspect = bw / max(bh, 1)
         if aspect > 6 and bh < int(h * 0.15):
             continue
-
-        # Filter out very small, scattered elements (likely noise)
         if area < (w * h) * 0.02:
             continue
-
-        # Prefer more square-ish elements (diagrams, talismans) or very wide (tables)
         if aspect < 4 or aspect > 8:
             boxes.append((x, y, bw, bh, area))
 
     boxes.sort(key=lambda b: b[4], reverse=True)
 
-    # merge overlapping boxes
     merged: List[Tuple[int, int, int, int, int]] = []
     for box in boxes:
         x, y, bw, bh, area = box
@@ -311,7 +319,7 @@ def detect_diagram_crops(
                 added = True
                 break
         if not added:
-            merged.append(box)
+            merged.append((x, y, bw, bh, area))
 
     merged.sort(key=lambda b: b[4], reverse=True)
     merged = merged[:max_crops]
@@ -345,6 +353,7 @@ Rules:
 - Return only the extracted text.
 """.strip()
 
+
 def build_translation_prompt(target_language: str) -> str:
     return f"""
 You are a strict translator.
@@ -360,6 +369,7 @@ Rules:
 - Return only the translated text.
 """.strip()
 
+
 def build_analysis_prompt(question: str) -> str:
     return f"""
 You are a document analyzer.
@@ -373,6 +383,7 @@ Rules:
 Question:
 {question}
 """.strip()
+
 
 def build_chat_prompt(message: str, target_language: str, document_text: str) -> str:
     base = f"""
@@ -395,6 +406,7 @@ User message:
     if document_text.strip():
         base += f"\n\nATTACHED DOCUMENT CONTENT:\n{document_text}"
     return base
+
 
 def build_crop_explain_prompt() -> str:
     return """
@@ -420,53 +432,57 @@ def call_gemini_text(prompt: str) -> str:
         )
         return getattr(response, "text", "") or ""
     except Exception as e:
-        if "getaddrinfo failed" in str(e) or "11002" in str(e):
+        err = str(e)
+        if "getaddrinfo failed" in err or "11002" in err:
             return "Network error: Unable to connect to Gemini API. Please check your internet connection and try again."
-        elif "API_KEY" in str(e) or "401" in str(e) or "403" in str(e):
+        if "API_KEY" in err or "401" in err or "403" in err:
             return "API key error: Please check your Gemini API key."
-        elif "429" in str(e):
+        if "429" in err:
             return "Rate limit error: Too many requests. Please try again in a moment."
-        elif "500" in str(e) or "502" in str(e) or "503" in str(e):
+        if any(code in err for code in ["500", "502", "503"]):
             return "Server error: Gemini API is temporarily unavailable. Please try again later."
-        else:
-            return f"Error: {str(e)}"
+        return f"Error: {err}"
+
 
 def call_gemini_with_images(prompt: str, images: List[Image.Image], mime_type: str = "image/png") -> str:
     try:
         client = get_client()
-        parts = [prompt]
+        contents: List[Any] = [prompt]
         for img in images:
-            parts.append(types.Part.from_bytes(data=pil_to_bytes(img, "PNG"), mime_type=mime_type))
+            contents.append(types.Part.from_bytes(data=pil_to_bytes(img, "PNG"), mime_type=mime_type))
 
         response = client.models.generate_content(
             model=MODEL_NAME,
-            contents=parts,
+            contents=contents,
             config=types.GenerateContentConfig(temperature=0.2),
         )
         return getattr(response, "text", "") or ""
     except Exception as e:
-        if "getaddrinfo failed" in str(e) or "11002" in str(e):
+        err = str(e)
+        if "getaddrinfo failed" in err or "11002" in err:
             return "Network error: Unable to connect to Gemini API. Please check your internet connection and try again."
-        elif "API_KEY" in str(e) or "401" in str(e) or "403" in str(e):
+        if "API_KEY" in err or "401" in err or "403" in err:
             return "API key error: Please check your Gemini API key."
-        elif "429" in str(e):
+        if "429" in err:
             return "Rate limit error: Too many requests. Please try again in a moment."
-        elif "500" in str(e) or "502" in str(e) or "503" in str(e):
+        if any(code in err for code in ["500", "502", "503"]):
             return "Server error: Gemini API is temporarily unavailable. Please try again later."
-        else:
-            return f"Error: {str(e)}"
+        return f"Error: {err}"
+
 
 def explain_crop(crop_img: Image.Image) -> str:
     return call_gemini_with_images(build_crop_explain_prompt(), [crop_img], "image/png")
 
 # =========================
+# CONTENT EXTRACTION
 # =========================
 def extract_content(uploaded_file) -> Dict[str, Any]:
+    uploaded_file.seek(0)
     file_bytes = uploaded_file.read()
     filename = uploaded_file.name
     ext = filename.lower().split(".")[-1] if "." in filename else ""
 
-    result = {
+    result: Dict[str, Any] = {
         "filename": filename,
         "original_text": "",
         "used_ocr": False,
@@ -522,23 +538,54 @@ def render_history_cards(items: List[Dict[str, Any]], empty_text: str):
         st.markdown(f'<div class="hist-title">{item.get("title", "Untitled")}</div>', unsafe_allow_html=True)
         st.caption(f"Type: {item.get('type', '')}")
 
-        if item.get("type") == "translation":
+        if item.get("type") == "translate":
             st.text(f"File: {payload.get('filename', '')}")
-            st.text_area("Original", value=payload.get("original_text", "")[:1200], height=120, disabled=True, key=f"hist_t_o_{id(item)}")
-            st.text_area("Translated", value=payload.get("translated_text", "")[:1200], height=120, disabled=True, key=f"hist_t_t_{id(item)}")
+            st.text_area(
+                "Original",
+                value=payload.get("original_text", "")[:1200],
+                height=120,
+                disabled=True,
+                key=f"hist_t_o_{id(item)}",
+            )
+            st.text_area(
+                "Translated",
+                value=payload.get("translated_text", "")[:1200],
+                height=120,
+                disabled=True,
+                key=f"hist_t_t_{id(item)}",
+            )
         elif item.get("type") == "ocr":
             st.text(f"File: {payload.get('filename', '')}")
-            st.text_area("OCR", value=payload.get("original_text", "")[:1600], height=140, disabled=True, key=f"hist_o_{id(item)}")
+            st.text_area(
+                "OCR",
+                value=payload.get("original_text", "")[:1600],
+                height=140,
+                disabled=True,
+                key=f"hist_o_{id(item)}",
+            )
         elif item.get("type") == "analysis":
             st.text(f"File: {payload.get('filename', '')}")
             st.text(f"Question: {payload.get('question', '')}")
-            st.text_area("Answer", value=payload.get("answer", "")[:1200], height=120, disabled=True, key=f"hist_a_{id(item)}")
+            st.text_area(
+                "Answer",
+                value=payload.get("answer", "")[:1200],
+                height=120,
+                disabled=True,
+                key=f"hist_a_{id(item)}",
+            )
         else:
             st.text(f"File: {payload.get('filename', '')}")
             st.text(f"Message: {payload.get('message', '')}")
-            st.text_area("Answer", value=payload.get("answer", "")[:1200], height=120, disabled=True, key=f"hist_c_{id(item)}")
+            st.text_area(
+                "Answer",
+                value=payload.get("answer", "")[:1200],
+                height=120,
+                disabled=True,
+                key=f"hist_c_{id(item)}",
+            )
 
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
 
 def render_crops(crops: List[Image.Image], key_prefix: str):
     if not crops:
@@ -558,11 +605,11 @@ def render_crops(crops: List[Image.Image], key_prefix: str):
                         value=explanation,
                         height=120,
                         disabled=True,
-                        key=f"{key_prefix}_explain_box_{i}"
+                        key=f"{key_prefix}_explain_box_{i}",
                     )
                 except Exception as e:
                     st.error(str(e))
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
 # SIDEBAR
@@ -594,33 +641,32 @@ if view == "Home":
     st.markdown('<div class="chat-shell">', unsafe_allow_html=True)
     st.markdown('<div class="hero-title" style="font-size: 48px;">📘 BABUCHITI</div>', unsafe_allow_html=True)
     st.markdown('<div class="hero-sub" style="font-size: 24px;">What is On Your Mind Today?</div>', unsafe_allow_html=True)
-    
-    # Logo after the titles
-    st.image("ABT LOGO.jpg", width=300, use_container_width=True)
-    
-    # Only show chat wrap if there are messages
+
+    if os.path.exists(LOGO_FILE):
+        st.image(LOGO_FILE, width=300)
+    else:
+        st.caption("Logo file not found: ABT LOGO.jpg")
+
     if st.session_state.chat_messages:
         st.markdown('<div class="chat-wrap">', unsafe_allow_html=True)
         for msg in st.session_state.chat_messages:
             cls = "user-msg" if msg["role"] == "user" else "assistant-msg"
             st.markdown(f'<div class="{cls}">{msg["content"]}</div>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    # Upload button above text input
     chat_file = st.file_uploader(
         "",
         type=["pdf", "docx", "txt", "png", "jpg", "jpeg", "webp"],
         label_visibility="collapsed",
         key="chat_file_uploader",
     )
-    
-    # Use only Streamlit components (no custom HTML)
+
     chat_message = st.text_area(
         "Ask Me Anything",
         placeholder="Ask Me Anything",
         height=90,
         key="chat_input_box",
-        label_visibility="visible"
+        label_visibility="visible",
     )
 
     send_chat = st.button("Send", use_container_width=True)
@@ -670,7 +716,7 @@ if view == "Home":
                             "original_text": document_text[:5000],
                             "target_language": st.session_state.output_language,
                             "used_ocr": used_ocr,
-                        }
+                        },
                     )
                     st.rerun()
 
@@ -678,7 +724,7 @@ if view == "Home":
                     st.session_state.chat_messages.append({"role": "assistant", "content": f"Error: {str(e)}"})
                     st.rerun()
 
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
 # SEARCH CHATS
@@ -702,20 +748,22 @@ elif view == "Search Chats":
             for item in items:
                 title = item.get("title", "").lower()
                 payload = item.get("payload", {})
-                haystack = " ".join([
-                    payload.get("filename", ""),
-                    payload.get("message", ""),
-                    payload.get("question", ""),
-                    payload.get("original_text", "")[:3000],
-                    payload.get("translated_text", "")[:3000],
-                    payload.get("answer", "")[:3000],
-                ]).lower()
+                haystack = " ".join(
+                    [
+                        payload.get("filename", ""),
+                        payload.get("message", ""),
+                        payload.get("question", ""),
+                        payload.get("original_text", "")[:3000],
+                        payload.get("translated_text", "")[:3000],
+                        payload.get("answer", "")[:3000],
+                    ]
+                ).lower()
                 if q in title or q in haystack:
                     filtered.append(item)
             items = filtered
 
     render_history_cards(items if do_search else [], "No search yet.")
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
 # DOCUMENT TRANSLATOR
@@ -730,17 +778,16 @@ elif view == "Document Translator":
         options=["Original", "Translated"],
         horizontal=True,
         key="translator_toggle",
-        label_visibility="collapsed"
+        label_visibility="collapsed",
     )
 
     st.markdown('<div class="result-box">', unsafe_allow_html=True)
     if trans_tab == "Original":
-        st.text_area("Original Text", value=st.session_state.translate_original, height=400, disabled=True, label_visibility="visible")
+        st.text_area("Original Text", value=st.session_state.translate_original, height=400, disabled=True)
     else:
-        st.text_area("Translated Text", value=st.session_state.translate_translated, height=400, disabled=True, label_visibility="visible")
-    st.markdown('</div>', unsafe_allow_html=True)
+        st.text_area("Translated Text", value=st.session_state.translate_translated, height=400, disabled=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    # File uploader and manual translate button
     col1, col2 = st.columns([3, 1])
     with col1:
         translate_file = st.file_uploader(
@@ -752,7 +799,6 @@ elif view == "Document Translator":
     with col2:
         do_translate = st.button("Translate", use_container_width=True)
 
-    # Manual translate when button is clicked
     if do_translate:
         if translate_file is None:
             st.warning("Please upload a file.")
@@ -771,7 +817,7 @@ elif view == "Document Translator":
 
                         st.session_state.translate_original = original_text
                         st.session_state.translate_translated = translated_text
-                        st.session_state.last_translated_file = translate_file.name
+                        st.session_state.translate_crops = extracted["crops"]
 
                         add_history(
                             "translate",
@@ -782,14 +828,14 @@ elif view == "Document Translator":
                                 "translated_text": translated_text[:5000],
                                 "target_language": st.session_state.output_language,
                                 "used_ocr": extracted["used_ocr"],
-                            }
+                            },
                         )
                         st.rerun()
                 except Exception as e:
                     st.error(str(e))
 
     render_crops(st.session_state.translate_crops, "translator")
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
 # OCR EDITOR
@@ -799,7 +845,6 @@ elif view == "OCR Editor":
     st.subheader("OCR Editor")
     st.write("Extract the exact text of your document.")
 
-    # File uploader at the top
     o1, o2 = st.columns([6, 1.5])
     with o1:
         ocr_file = st.file_uploader(
@@ -811,16 +856,14 @@ elif view == "OCR Editor":
     with o2:
         do_ocr = st.button("Extract Text", use_container_width=True)
 
-    # Show selected file info
     if ocr_file is not None:
         st.info(f"File selected: {ocr_file.name}")
     else:
         st.info("No file selected")
 
-    # Extracted Text result box below
     st.markdown('<div class="result-box">', unsafe_allow_html=True)
-    st.text_area("Extracted Text", value=st.session_state.ocr_result, height=400, disabled=True, label_visibility="visible")
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.text_area("Extracted Text", value=st.session_state.ocr_result, height=400, disabled=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
     if do_ocr:
         if ocr_file is None:
@@ -839,14 +882,14 @@ elif view == "OCR Editor":
                             "filename": extracted["filename"],
                             "original_text": extracted["original_text"],
                             "used_ocr": extracted["used_ocr"],
-                        }
+                        },
                     )
                     st.rerun()
                 except Exception as e:
                     st.error(str(e))
 
     render_crops(st.session_state.ocr_crops, "ocr")
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
 # DOCUMENT ANALYZER
@@ -900,18 +943,18 @@ elif view == "Document Analyzer":
                                 "answer": answer,
                                 "original_text": original_text[:5000],
                                 "used_ocr": extracted["used_ocr"],
-                            }
+                            },
                         )
                         st.rerun()
                 except Exception as e:
                     st.error(str(e))
 
     st.markdown('<div class="result-box">', unsafe_allow_html=True)
-    st.text_area("Answer", value=st.session_state.analysis_result, height=350, disabled=True, label_visibility="visible")
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.text_area("Answer", value=st.session_state.analysis_result, height=350, disabled=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
     render_crops(st.session_state.analysis_crops, "analysis")
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
 # OUTPUT LANGUAGE
@@ -921,10 +964,11 @@ elif view == "Output Language":
     st.subheader("Output Language")
     st.write("Select the language the translator will translate into.")
 
+    options = ["English", "French", "Arabic", "Yoruba", "Hausa", "Igbo"]
     lang = st.selectbox(
         "Language",
-        ["English", "French", "Arabic", "Yoruba", "Hausa", "Igbo"],
-        index=["English", "French", "Arabic", "Yoruba", "Hausa", "Igbo"].index(st.session_state.output_language),
+        options,
+        index=options.index(st.session_state.output_language),
         key="language_select_box",
     )
 
@@ -933,7 +977,7 @@ elif view == "Output Language":
         st.success(f"Current output language: {lang}")
 
     st.info(f"Current output language: {st.session_state.output_language}")
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
 # HISTORY
@@ -951,4 +995,4 @@ elif view == "History":
             st.rerun()
 
     render_history_cards(load_history(), "No history yet.")
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
