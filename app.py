@@ -3,6 +3,13 @@ import json
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
+import streamlit as st
+from PIL import Image
+from docx import Document
+from google import genai
+from google.genai import types
+
 try:
     import cv2
 except ImportError as e:
@@ -18,13 +25,6 @@ except ImportError as e:
     st.error("🔧 Fix: Ensure PyMuPDF is properly installed.")
     st.error("📦 Add 'PyMuPDF' to requirements.txt and redeploy.")
     st.stop()
-
-import numpy as np
-import streamlit as st
-from PIL import Image
-from docx import Document
-from google import genai
-from google.genai import types
 
 # =========================
 # CONFIG
