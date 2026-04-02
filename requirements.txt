@@ -6,3 +6,4 @@ pillow
 numpy
 python-dotenv
 reportlab
+PyMuPDF
