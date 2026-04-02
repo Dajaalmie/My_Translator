@@ -168,25 +168,52 @@ for k, v in defaults.items():
         st.session_state[k] = v
 
 # =========================
-# CLIENT
+# SAFE ENV LOADING
 # =========================
-def get_gemini_api_key() -> str:
-    return (
-        st.secrets.get("GEMINI_API_KEY", "")
-        or os.getenv("GEMINI_API_KEY", "")
-    ).strip()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 
+# =========================
+# GEMINI API KEY HANDLER
+# =========================
+def get_gemini_api_key():
+    """
+    Loads API key safely from:
+    1. .env file
+    2. Streamlit secrets
+    """
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+
+    if api_key:
+        return api_key
+
+    try:
+        return st.secrets["GEMINI_API_KEY"].strip()
+    except Exception:
+        return ""
+
+
+# =========================
+# GEMINI CLIENT
+# =========================
 def get_client():
-    gemini_api_key = get_gemini_api_key()
-    if not gemini_api_key:
-        st.error("❌ API Key Error: GEMINI_API_KEY was not found.")
-        st.error("🔧 Fix: Add GEMINI_API_KEY to Streamlit secrets or your .env file.")
+    api_key = get_gemini_api_key()
+
+    if not api_key:
+        st.error("❌ Gemini API key not found.")
+        st.info("Add GEMINI_API_KEY to .env or Streamlit secrets.")
         st.stop()
-    if gemini_api_key == "PASTE_YOUR_GEMINI_API_KEY_HERE":
-        st.error("❌ API Key Error: Please replace the placeholder API key.")
+
+    try:
+        return genai.Client(api_key=api_key)
+
+    except Exception as e:
+        st.error(f"❌ Failed to initialize Gemini client: {str(e)}")
         st.stop()
-    return genai.Client(api_key=gemini_api_key)
 
 # =========================
 # HISTORY
